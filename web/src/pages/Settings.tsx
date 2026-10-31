@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
-import { Activity, Boxes, Cloud, Database, DatabaseBackup, ExternalLink, Files, Home, Info, MapPin, Network, Radio, Server, Settings as SettingsIcon, Shield, Tags, Terminal, Wand2 } from 'lucide-react';
+import { Activity, Boxes, Cloud, Database, DatabaseBackup, ExternalLink, Files, Home, Info, MapPin, Network, Radio, Server, Settings as SettingsIcon, Shield, Tags, Terminal, Wand2, Wifi } from 'lucide-react';
 import { AgentAutoUpdate, AgentHubSettings, AgentManualCommands, AgentTlsInfo } from '../components/AgentSettings';
 import { HomeAssistantPanel } from '../components/HomeAssistantPanel';
 import { RolesSettings } from '../components/HubRoles';
@@ -12,6 +12,7 @@ import { SitesSettings } from '../components/SitesSettings';
 import { TagsSettings } from '../components/TagsSettings';
 import { SetupSettings } from '../components/SetupSettings';
 import { HealthSettings } from '../components/HealthSettings';
+import { FreeboxSettingsPanel } from '../components/FreeboxSettingsPanel';
 import { HeaderTitle } from '../components/HeaderSlot';
 import { Button, Modal, Panel, VerticalTabs } from '../components/ui';
 import { api } from '../lib/api';
@@ -29,6 +30,7 @@ const tabs = [
   { id: 'omada', label: 'Omada', icon: Network },
   { id: 'health', label: 'Santé', icon: Activity },
   { id: 'homeassistant', label: 'Home Assistant', icon: Home },
+  { id: 'freebox', label: 'Freebox', icon: Wifi },
   { id: 'about', label: 'À propos', icon: Info, dividerBefore: true },
 ] as const;
 
@@ -112,6 +114,7 @@ export function Settings() {
     omada: <OmadaInventory />,
     health: <HealthSettings />,
     homeassistant: <HomeAssistantPanel />,
+    freebox: <FreeboxSettingsPanel />,
     about: (
       <div className="space-y-4">
         <Panel title="Homelab Manager" icon={Info}>

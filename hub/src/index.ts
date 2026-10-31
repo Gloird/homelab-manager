@@ -36,7 +36,8 @@ import { startProbes } from './probes.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerSummaryRoutes } from './routes/summary.js';
 import { registerHealthRoutes } from './health.js';
-import { loadHaBridgeSettings, migrateHaBroker, registerAgentSettingsRoutes, registerSettingsRoutes } from './routes/settings.js';
+import { loadHaBridgeSettings, migrateHaBroker, registerAgentSettingsRoutes, registerSettingsRoutes, registerFreeboxSettingsRoutes } from './routes/settings.js';
+import { startFreeboxPoller } from './freeboxSync.js';
 import { registerAgentDownloadRoute } from './routes/install.js';
 import { HomeAssistantBridge } from './homeassistant/bridge.js';
 import { startScheduler } from './scheduler.js';
@@ -94,6 +95,7 @@ registerHealthRoutes(app);
 const bridge = new HomeAssistantBridge(app.log);
 registerSettingsRoutes(app, bridge);
 registerAgentSettingsRoutes(app, bridge);
+registerFreeboxSettingsRoutes(app);
 registerAgentDownloadRoute(app);
 app.get('/api/health', async () => ({ ok: true, version: config.version }));
 // The agents moved to the TLS port: an old install / upgrade command fails with an explanation
@@ -125,6 +127,7 @@ const stopMountReconciler = startMountReconciler(app.log);
 const stopPvePoller = startPvePoller(app.log);
 const stopOmadaPoller = startOmadaPoller(app.log);
 const stopProbes = startProbes(app.log);
+const stopFreeboxPoller = startFreeboxPoller(app.log);
 await bridge.apply(await loadHaBridgeSettings());
 watchSettingsRoles();
 // the broker role of the bridge changed (edited, moved, its host got other IPs): apply does nothing when the address and
@@ -147,6 +150,7 @@ async function shutdown() {
   stopPvePoller();
   stopOmadaPoller();
   stopProbes();
+  stopFreeboxPoller();
   await bridge.stop(false);
   await flushLogs().catch(() => {});
   await app.close();

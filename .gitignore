@@ -10,3 +10,4 @@ mongo-config/
 tailscale.env
 tailscale/
 logs/
+.config/

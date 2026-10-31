@@ -227,3 +227,83 @@ export function registerAgentSettingsRoutes(app: FastifyInstance, bridge: HomeAs
     return dto(req);
   });
 }
+
+// Freebox OS: settings, authorization, test
+import { loadFreeboxSettings, ensureFreeboxSettings, DEFAULT_FREEBOX_SETTINGS } from '../freeboxSync.js';
+import { testFreeboxConnection, startFreeboxAuthorization, checkFreeboxAuthorization, saveFreeboxAppToken } from '../freeboxSync.js';
+import type { FreeboxSettings } from '../types.js';
+
+const freeboxBody = {
+  type: 'object',
+  minProperties: 1,
+  additionalProperties: false,
+  properties: {
+    enabled: { type: 'boolean' },
+    url: { type: 'string', maxLength: 256 },
+    appId: { type: 'string', maxLength: 64 },
+    appName: { type: 'string', maxLength: 64 },
+    apiVersion: { type: 'integer', minimum: 1, maximum: 10 },
+  },
+} as const;
+
+function freeboxDto(s: FreeboxSettings) {
+  const { appToken: _appToken, _id, ...rest } = s;
+  return {
+    ...rest,
+    // Don't expose appToken, only whether the app is authorized
+    appToken: s.appToken ? '***' : null,
+    // Add poll state
+    polledAt: s.polledAt ?? null,
+    pollError: s.pollError ?? null,
+  };
+}
+
+export function registerFreeboxSettingsRoutes(app: FastifyInstance) {
+  app.get('/api/settings/freebox', async () => {
+    const s = await loadFreeboxSettings();
+    return s ? freeboxDto(s) : { ...DEFAULT_FREEBOX_SETTINGS, appToken: null, polledAt: null, pollError: null };
+  });
+
+  app.put<{ Body: Partial<FreeboxSettings> }>('/api/settings/freebox', { schema: { body: freeboxBody } }, async (req, reply) => {
+    const current = await ensureFreeboxSettings();
+    const next = { ...current, ...req.body };
+    if (next.url) next.url = next.url.trim().replace(/\/+$/, '');
+    if (next.appId) next.appId = next.appId.trim();
+    if (next.appName) next.appName = next.appName.trim();
+    await settings.replaceOne({ _id: 'freebox' }, next, { upsert: true });
+    return freeboxDto(next);
+  });
+
+  // Test connection
+  app.post('/api/settings/freebox/test', async (req, reply) => {
+    const cfg = await loadFreeboxSettings();
+    if (!cfg) return reply.code(400).send({ ok: false, error: 'Freebox non configurée' });
+    return testFreeboxConnection(cfg);
+  });
+
+  // Start authorization (step 1)
+  app.post('/api/settings/freebox/authorize', async (req, reply) => {
+    const cfg = await ensureFreeboxSettings();
+    try {
+      const { track_id, app_token } = await startFreeboxAuthorization(cfg);
+      return { track_id, app_token };
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : 'Erreur autorisation' });
+    }
+  });
+
+  // Check authorization (step 2 - poll)
+  app.post<{ Body: { track_id: number } }>('/api/settings/freebox/authorize/check', { schema: { body: { type: 'object', required: ['track_id'], additionalProperties: false, properties: { track_id: { type: 'integer' } } } } }, async (req, reply) => {
+    const cfg = await loadFreeboxSettings();
+    if (!cfg) return reply.code(400).send({ error: 'Freebox non configurée' });
+    try {
+      const { granted, app_token } = await checkFreeboxAuthorization(cfg, req.body.track_id);
+      if (granted && app_token) {
+        await saveFreeboxAppToken(app_token);
+      }
+      return { granted, app_token: app_token ? '***' : undefined };
+    } catch (err) {
+      return reply.code(500).send({ error: err instanceof Error ? err.message : 'Erreur vérification' });
+    }
+  });
+}

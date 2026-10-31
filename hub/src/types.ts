@@ -662,7 +662,29 @@ export interface PbsSettings {
   retryAfterHours?: number;
 }
 
-// One backup group of the PBS: datastore + namespace + type + id.
+// --- Freebox OS (see freebox.ts, freeboxSync.ts) ---------------------------------------------
+
+export interface FreeboxSettings {
+  _id: 'freebox';
+  enabled: boolean;
+  // Base URL of the Freebox API (e.g. https://mafreebox.freebox.fr or https://<api_domain>:<port>)
+  url: string;
+  // Application token obtained during authorization (stored after user approves on Freebox)
+  appToken: string;
+  // Application ID declared on Freebox (e.g. "homelab-manager")
+  appId: string;
+  // Application name displayed on Freebox
+  appName: string;
+  // API major version (4, 5, 6...)
+  apiVersion: number;
+  // Device unique ID (from api_version)
+  deviceUid?: string;
+  // Device type (e.g. "FreeboxServer7,1")
+  deviceType?: string;
+  // Last poll
+  polledAt?: Date;
+  pollError?: string | null;
+}
 // sources whose groups are not on the PBS: the PBS poll, its disconnection, its mount and the copies leave them alone
 export const OFF_PBS_SOURCES = ['haos', 'pve-storage'] as const;
 export type BackupSource = 'vzdump' | 'managed' | (typeof OFF_PBS_SOURCES)[number];
@@ -1310,7 +1332,7 @@ export const EQUIPMENT_TYPES = ['gateway', 'switch', 'ap', 'coordinator', 'bridg
 export type EquipmentType = (typeof EQUIPMENT_TYPES)[number];
 
 // manual: typed in the interface; the others are kept up to date by the synchronisation of their source (#231)
-export const EQUIPMENT_SOURCES = ['manual', 'omada'] as const;
+export const EQUIPMENT_SOURCES = ['manual', 'omada', 'freebox'] as const;
 export type EquipmentSource = (typeof EQUIPMENT_SOURCES)[number];
 
 // What an automatic source reports of an equipment, written by its synchronisation: its native checks (connected,

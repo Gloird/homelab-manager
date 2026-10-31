@@ -659,6 +659,29 @@ export interface AgentSettings {
   };
 }
 
+export interface FreeboxSettings {
+  enabled: boolean;
+  url: string;
+  appId: string;
+  appName: string;
+  apiVersion: number;
+  // The token itself is never exposed, only '***' when the app is authorized
+  appToken: string | null;
+  polledAt: string | null;
+  pollError: string | null;
+  deviceType?: string | null;
+}
+
+export interface FreeboxAuthorizeResult {
+  track_id: number;
+  app_token: string;
+}
+
+export interface FreeboxAuthCheckResult {
+  granted: boolean;
+  app_token?: string;
+}
+
 export interface InstallInfo {
   installCommand: string | null; // null: invalid hub URL
   haosToken: string | null; // Home Assistant OS add-on (same code), null: invalid hub URL
@@ -1410,7 +1433,7 @@ export interface MqttBrokerView {
 // Equipment: what is followed without an agent (hub/src/equipments.ts). manual: typed here; the others come from
 // their source, which provides type, site, IP and uplink (only the name is edited).
 export type EquipmentType = 'gateway' | 'switch' | 'ap' | 'coordinator' | 'bridge' | 'iot' | 'other';
-export type EquipmentSource = 'manual' | 'omada';
+export type EquipmentSource = 'manual' | 'omada' | 'freebox';
 export interface Equipment {
   id: string;
   name: string;
@@ -1520,6 +1543,13 @@ export const api = {
   agentSettings: () => request<AgentSettings>('GET', '/api/settings/agents'),
   saveAgentSettings: (patch: Partial<Pick<AgentSettings, 'autoUpdate' | 'hubUrl' | 'checkIntervalHours' | 'agentPort' | 'tailscaleHub'>>) =>
     request<AgentSettings>('PUT', '/api/settings/agents', patch),
+
+  freeboxSettings: () => request<FreeboxSettings>('GET', '/api/settings/freebox'),
+  saveFreeboxSettings: (patch: Partial<Pick<FreeboxSettings, 'enabled' | 'url' | 'appId' | 'appName' | 'apiVersion'>>) =>
+    request<FreeboxSettings>('PUT', '/api/settings/freebox', patch),
+  testFreebox: () => request<{ ok: boolean; error?: string }>('POST', '/api/settings/freebox/test'),
+  authorizeFreebox: () => request<FreeboxAuthorizeResult>('POST', '/api/settings/freebox/authorize'),
+  checkFreeboxAuthorization: (track_id: number) => request<FreeboxAuthCheckResult>('POST', '/api/settings/freebox/authorize/check', { track_id }),
 
   jobs: (limit = 100) => request<Job[]>('GET', `/api/jobs?limit=${limit}`),
   hostJobs: (id: string) => request<Job[]>('GET', `/api/hosts/${id}/jobs`),

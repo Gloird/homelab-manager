@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -17,8 +18,10 @@ func TestKeygenAndSign(t *testing.T) {
 	if err := run([]string{"keygen", "-key", keyFile, "-pub", pubFile}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _ := os.Stat(keyFile); st.Mode().Perm() != 0o600 {
-		t.Fatalf("key file mode %v, want 0600", st.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		if st, _ := os.Stat(keyFile); st.Mode().Perm() != 0o600 {
+			t.Fatalf("key file mode %v, want 0600", st.Mode().Perm())
+		}
 	}
 	if run([]string{"keygen", "-key", keyFile, "-pub", pubFile}) == nil {
 		t.Fatal("an existing key was overwritten")
