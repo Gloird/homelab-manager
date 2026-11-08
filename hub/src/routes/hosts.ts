@@ -89,6 +89,14 @@ async function dockerHost(id: string, stack: string, reply: { code: (n: number) 
   return host;
 }
 
+function pendingWingetPackages(host: Pick<HostDoc, 'pendingUpdates' | 'ignoredWingetUpdates'>) {
+  const ignored = new Set((host.ignoredWingetUpdates ?? []).map((id) => id.trim()).filter((id) => id));
+  const ids = (host.pendingUpdates?.winget ?? [])
+    .map((u) => u.id.trim())
+    .filter((id) => id && !ignored.has(id));
+  return [...new Set(ids)];
+}
+
 function agentError(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, err: unknown) {
   if (err instanceof AgentRequestError) return reply.code(502).send({ error: err.message });
   throw err;
@@ -353,7 +361,8 @@ export function registerHostRoutes(app: FastifyInstance) {
       }
       const packages = req.body.packages ?? [];
       if (!validPackages(packages)) return reply.code(400).send({ error: 'invalid package name' });
-      const job = await createJob(host, action, packages, 'manual', { stack, service, sessionId });
+      const selectedPackages = action === 'winget_upgrade' && packages.length === 0 ? pendingWingetPackages(host) : packages;
+      const job = await createJob(host, action, selectedPackages, 'manual', { stack, service, sessionId });
       reply.code(202);
       return jobDto(job);
     },
@@ -378,10 +387,42 @@ export function registerHostRoutes(app: FastifyInstance) {
       if (!isOnline(req.params.id)) return reply.code(409).send({ error: 'hôte hors ligne' });
       if (host.info?.osId !== 'windows') return reply.code(400).send({ error: "cet hôte n'est pas Windows" });
       if (!host.capabilities?.includes('updates_winget')) return reply.code(400).send({ error: "winget n'est pas disponible sur cet hôte" });
-      const packages = req.body?.id ? [req.body.id] : [];
+      const packages = req.body?.id ? [req.body.id] : pendingWingetPackages(host);
       const job = await createJob(host, 'winget_upgrade', packages, 'manual');
       reply.code(202);
       return jobDto(job);
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: { ids: string[] } }>(
+    '/api/hosts/:id/updates/winget/ignored',
+    {
+      schema: {
+        params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+        body: {
+          type: 'object',
+          required: ['ids'],
+          additionalProperties: false,
+          properties: {
+            ids: { type: 'array', maxItems: 500, uniqueItems: true, items: { type: 'string', minLength: 1, maxLength: 200 } },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const _id = parseId(req.params.id);
+      const host = _id && (await hosts.findOne({ _id }));
+      if (!host) return reply.code(404).send({ error: 'host not found' });
+      if (host.info?.osId !== 'windows') return reply.code(400).send({ error: "cet hôte n'est pas Windows" });
+      const ids = [...new Set(req.body.ids.map((id) => id.trim()).filter((id) => id))];
+      if (!validPackages(ids)) return reply.code(400).send({ error: 'invalid package id' });
+      const updated = ids.length
+        ? await hosts.findOneAndUpdate({ _id }, { $set: { ignoredWingetUpdates: ids } }, { returnDocument: 'after' })
+        : await hosts.findOneAndUpdate({ _id }, { $unset: { ignoredWingetUpdates: 1 } }, { returnDocument: 'after' });
+      if (!updated) return reply.code(404).send({ error: 'host not found' });
+      const dto = hostDto(updated);
+      publish('host', dto);
+      return { ids: dto.ignoredWingetUpdates };
     },
   );
 

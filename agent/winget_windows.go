@@ -25,6 +25,22 @@ func wingetOutputUnsupportedArg(stderr string) bool {
 		(strings.Contains(s, "not recognized") || strings.Contains(s, "n'a pas été reconnu") || strings.Contains(s, "n’a pas été reconnu"))
 }
 
+func isWingetSummaryLine(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	low := strings.ToLower(s)
+	if strings.Contains(low, "upgrades available") || strings.Contains(low, "upgrade available") ||
+		strings.Contains(low, "packages available") || strings.Contains(low, "package(s) available") {
+		return true
+	}
+	if strings.Contains(low, "no package") || strings.Contains(low, "aucun package") {
+		return true
+	}
+	return regexp.MustCompile(`^\d+\s+(package|packages|upgrade|upgrades)\b.*(available|found)\b.*$`).MatchString(low)
+}
+
 func wingetPath() string {
 	if p, err := exec.LookPath("winget"); err == nil && p != "" {
 		return p
@@ -152,6 +168,9 @@ func parseWingetTable(out string) []map[string]string {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		if isWingetSummaryLine(line) {
+			continue
+		}
 		cols := []string{}
 		runes := []rune(line)
 		for i := 0; i < len(starts)-1; i++ {
@@ -178,6 +197,9 @@ func parseWingetTable(out string) []map[string]string {
 			}
 		}
 		if empty {
+			continue
+		}
+		if isWingetSummaryLine(cols[0]) || (len(cols) > 1 && isWingetSummaryLine(cols[1])) {
 			continue
 		}
 		row := map[string]string{

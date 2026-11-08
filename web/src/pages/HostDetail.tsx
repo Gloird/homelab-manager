@@ -217,17 +217,56 @@ function PackagesPanel({ host, upgrading, running, onStarted }: { host: Host; up
 
 function WindowsUpdatesPanel({ host, running, onStarted }: { host: Host; running: boolean; onStarted: (jobId: string) => void }) {
   const run = useRunJob();
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const { canWrite } = useMe();
   const updates = host.pendingUpdates;
-  const winget = updates?.winget ?? [];
+  const ignored = new Set(host.ignoredWingetUpdates ?? []);
+  const winget = (updates?.winget ?? []).filter((u) => !ignored.has(u.id));
+  const wingetIgnored = (updates?.winget ?? []).filter((u) => ignored.has(u.id));
   const windows = updates?.windows ?? [];
+  const [runningWingetAll, setRunningWingetAll] = useState(false);
+  const [savingIgnoreId, setSavingIgnoreId] = useState<string | null>(null);
+
+  const saveIgnored = async (ids: string[]) => {
+    await api.saveIgnoredWingetUpdates(host.id, ids);
+    await queryClient.invalidateQueries({ queryKey: keys.hosts });
+  };
+
+  const runWingetAll = async () => {
+    setRunningWingetAll(true);
+    try {
+      const j = await api.runWingetUpdates(host.id);
+      onStarted(j.id);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setRunningWingetAll(false);
+    }
+  };
+
+  const toggleIgnored = async (id: string, enabled: boolean) => {
+    if (!id) return;
+    setSavingIgnoreId(id);
+    try {
+      const current = host.ignoredWingetUpdates ?? [];
+      const next = enabled ? [...new Set([...current, id])] : current.filter((x) => x !== id);
+      await saveIgnored(next);
+      toast.success(enabled ? 'Application ignorée pour Winget' : 'Application retirée des ignorées');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingIgnoreId(null);
+    }
+  };
+
   return (
     <Panel
       title={<>Mises à jour Windows <span className="text-muted">({winget.length + windows.length})</span></>}
       icon={ArrowUpCircle}
       actions={canWrite ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" icon={ArrowUpCircle} disabled={!host.online || running} loading={run.isPending && run.variables?.action === 'winget_upgrade'} onClick={() => run.mutate({ hostId: host.id, action: 'winget_upgrade' }, { onSuccess: (j) => onStarted(j.id) })}>
+          <Button size="sm" icon={ArrowUpCircle} disabled={!host.online || running} loading={runningWingetAll} onClick={runWingetAll}>
             Tout mettre à jour (Winget)
           </Button>
           <Button size="sm" icon={ArrowUpCircle} disabled={!host.online || running} loading={run.isPending && run.variables?.action === 'windows_update'} onClick={() => run.mutate({ hostId: host.id, action: 'windows_update' }, { onSuccess: (j) => onStarted(j.id) })}>
@@ -246,10 +285,47 @@ function WindowsUpdatesPanel({ host, running, onStarted }: { host: Host; running
               <div className="max-h-64 overflow-auto">
                 {winget.map((u) => (
                   <div key={`${u.id}:${u.available ?? ''}`} className="border-b border-line px-3 py-2 last:border-b-0">
-                    <div className="text-sm text-zinc-100">{u.name}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm text-zinc-100">{u.name}</div>
+                      {canWrite && (
+                        <Button
+                          size="sm"
+                          disabled={!u.id || savingIgnoreId === u.id}
+                          loading={savingIgnoreId === u.id}
+                          onClick={() => toggleIgnored(u.id, true)}
+                        >
+                          Ignorer
+                        </Button>
+                      )}
+                    </div>
                     <div className="font-mono text-xs text-muted">{u.id} · {u.current ?? '?'} → {u.available ?? '?'}</div>
                   </div>
                 ))}
+              </div>
+            )}
+            {wingetIgnored.length > 0 && (
+              <div className="border-t border-line px-3 py-2">
+                <div className="mb-2 text-[11px] uppercase tracking-wide text-muted">Ignorées ({wingetIgnored.length})</div>
+                <div className="space-y-2">
+                  {wingetIgnored.map((u) => (
+                    <div key={`ignored:${u.id}:${u.available ?? ''}`} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs text-zinc-300">{u.name}</div>
+                        <div className="truncate font-mono text-[11px] text-muted">{u.id}</div>
+                      </div>
+                      {canWrite && (
+                        <Button
+                          size="sm"
+                          disabled={!u.id || savingIgnoreId === u.id}
+                          loading={savingIgnoreId === u.id}
+                          onClick={() => toggleIgnored(u.id, false)}
+                        >
+                          Réactiver
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

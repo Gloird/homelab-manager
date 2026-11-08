@@ -424,6 +424,8 @@ export interface Host {
   installedSoftware: InstalledSoftware[];
   // Windows: pending updates from winget and Windows Update
   pendingUpdates: PendingUpdates | null;
+  // Windows: winget package ids ignored in pending updates and bulk upgrade
+  ignoredWingetUpdates: string[];
 }
 
 export interface HostSession {
@@ -1649,6 +1651,8 @@ export const api = {
     request<Job>('POST', `/api/hosts/${hostId}/jobs`, { action, packages, ...target }),
   runWingetUpdates: (hostId: string, id?: string) =>
     request<Job>('POST', `/api/hosts/${hostId}/updates/winget`, id ? { id } : {}),
+  saveIgnoredWingetUpdates: (hostId: string, ids: string[]) =>
+    request<{ ids: string[] }>('PUT', `/api/hosts/${hostId}/updates/winget/ignored`, { ids }),
   runWindowsUpdates: (hostId: string) =>
     request<Job>('POST', `/api/hosts/${hostId}/updates/windows`),
 

@@ -38,11 +38,31 @@ if [ -n "$uptodate" ]; then
 fi
 
 # -buildvcs=false: the git revision must not change the binary (its hash marks the agent outdated)
+release_key=${RELEASE_KEY:-$HOME/.config/homelab-manager/release.key}
+release_pub=""
+if [ -f "$release_key" ] && [ -f release.pub ]; then
+    release_pub=$(cat release.pub)
+    if [ "$(go run ./cmd/hm-sign pub -key "$release_key")" != "$release_pub" ]; then
+        echo "❌ $release_key ne correspond pas à agent/release.pub" >&2
+        exit 1
+    fi
+else
+    echo "⚠️  Pas de clé de release ($release_key) : agents de développement non signés"
+fi
 for t in $TARGETS; do
     echo "agent $version $t"
+    ldflags="-s -w -X main.version=$version"
+    if [ -n "$release_pub" ]; then
+        ldflags="$ldflags -X main.releasePubKey=$release_pub"
+    fi
     CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath -buildvcs=false \
-        -ldflags "-s -w -X main.version=$version" -o "$(out "$t")" .
+        -ldflags "$ldflags" -o "$(out "$t")" .
 done
+if [ -n "$release_pub" ]; then
+    for t in $TARGETS; do
+        go run ./cmd/hm-sign sign -key "$release_key" "$(out "$t")"
+    done
+fi
 echo "$version" > VERSION
 echo "$version" > dist/VERSION
 echo "$src" > .build-hash

@@ -122,7 +122,7 @@ func collectWingetUpdatesText(ctx context.Context) ([]WingetUpdate, error) {
 		if id == "" {
 			id = name
 		}
-		if id == "" {
+		if id == "" || isWingetSummaryLine(id) || isWingetSummaryLine(name) {
 			continue
 		}
 		key := strings.ToLower(id + "\x00" + name)
@@ -158,7 +158,7 @@ func runWingetUpgrade(ctx context.Context, emit func(string), ids []string) (int
 	}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
-		if id == "" {
+		if id == "" || isWingetSummaryLine(id) {
 			continue
 		}
 		if !wingetIDRe.MatchString(id) {

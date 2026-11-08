@@ -72,7 +72,9 @@ export function Updates() {
   const wingetRows = useMemo(() => {
     const map = new Map<string, WingetRow>();
     for (const h of windowsHosts) {
+      const ignored = new Set(h.ignoredWingetUpdates ?? []);
       for (const u of h.pendingUpdates?.winget ?? []) {
+        if (ignored.has(u.id)) continue;
         const key = u.id || u.name;
         if (!key) continue;
         const row = map.get(key) ?? { id: key, name: u.name || key, available: new Set(), hosts: [] };
@@ -310,7 +312,7 @@ export function Updates() {
                   <div className="min-w-0">
                     <Link to={`/hosts/${h.id}`} className="font-medium text-zinc-100 hover:text-emerald-300">{h.name}</Link>
                     <div className="text-xs text-muted">
-                      Winget: {h.pendingUpdates?.winget.length ?? 0} · Windows: {h.pendingUpdates?.windows.length ?? 0}
+                      Winget: {(h.pendingUpdates?.winget ?? []).filter((u) => !(h.ignoredWingetUpdates ?? []).includes(u.id)).length} · Windows: {h.pendingUpdates?.windows.length ?? 0}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">

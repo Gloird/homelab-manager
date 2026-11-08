@@ -359,6 +359,8 @@ export interface HostDoc {
   installedSoftware?: InstalledSoftware[];
   // Windows: pending updates from winget and Windows Update
   pendingUpdates?: PendingUpdates;
+  // Windows: winget package ids to ignore in the pending list and "all updates"
+  ignoredWingetUpdates?: string[];
   dockerUpdates?: DockerUpdates;
   lastDockerAutoCheckAt?: Date;
   // local images changed since the last registry check: a docker_check is due as soon as the host is free
