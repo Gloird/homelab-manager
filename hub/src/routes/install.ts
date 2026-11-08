@@ -8,7 +8,8 @@ import { loadPki } from '../pkiStore.js';
 
 // Served on the TLS agent port only: the install command pins its certificate.
 export function registerInstallRoutes(app: FastifyInstance) {
-  const template = readFileSync(join(config.assetsDir, 'install.sh'), 'utf8');
+  // Keep the served script POSIX-sh friendly even when the file is checked out with CRLF on Windows hosts.
+  const template = readFileSync(join(config.assetsDir, 'install.sh'), 'utf8').replaceAll('\r\n', '\n');
 
   // Generic installer: the single-use enrollment code is passed as argument when it is run.
   app.get('/install.sh', async (req, reply) => {

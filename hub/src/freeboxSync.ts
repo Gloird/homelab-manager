@@ -3,11 +3,11 @@
 
 import type { FastifyBaseLogger } from 'fastify';
 import { ObjectId } from 'mongodb';
-import { equipments, settings } from './db.js';
+import { equipments, freeboxMetrics, settings } from './db.js';
 import { publish } from './events.js';
 import { loadSites } from './catalog.js';
 import type { EquipmentDoc, EquipmentNative, FreeboxSettings, AlertLevel } from './types.js';
-import { createFreeboxClient, buildFreeboxNativeChecks } from './freebox.js';
+import { createFreeboxClient, buildFreeboxMetricReport, buildFreeboxNativeChecks } from './freebox.js';
 
 const POLL_INTERVAL_MS = 5 * 60_000;
 const NATIVE_STALE_MS = 15 * 60_000;
@@ -33,7 +33,7 @@ export async function loadFreeboxSettings(): Promise<FreeboxSettings | null> {
 export const DEFAULT_FREEBOX_SETTINGS: FreeboxSettings = {
   _id: 'freebox',
   enabled: false,
-  url: 'https://mafreebox.freebox.fr',
+  url: 'http://mafreebox.freebox.fr',
   appToken: '',
   appId: 'homelab-manager',
   appName: 'Homelab Manager',
@@ -143,6 +143,21 @@ export async function pollFreebox(log?: FastifyBaseLogger): Promise<FreeboxPollS
 
     const equipment = await getOrCreateFreeboxEquipment();
     await updateFreeboxEquipment(equipment, checks);
+    const metric = buildFreeboxMetricReport(data);
+    const hasMetric =
+      metric.tempC !== undefined ||
+      metric.downRate !== undefined ||
+      metric.upRate !== undefined ||
+      metric.diskUsedPercent !== undefined ||
+      metric.lanDevices !== undefined ||
+      metric.vmTotal !== undefined;
+    if (hasMetric) {
+      await freeboxMetrics.insertOne({
+        equipmentId: equipment._id,
+        sampledAt: new Date(metric.checkedAt),
+        report: metric,
+      });
+    }
 
     if (!cfg.deviceUid && data.connection) {
       const apiVersion = await client.getApiVersion();
@@ -203,7 +218,7 @@ export function startFreeboxPoller(log: FastifyBaseLogger): () => void {
 }
 
 /** Test Freebox connection with current settings */
-export async function testFreeboxConnection(cfg: FreeboxSettings): Promise<{ ok: boolean; error?: string }> {
+export async function testFreeboxConnection(cfg: FreeboxSettings, log?: FastifyBaseLogger): Promise<{ ok: boolean; error?: string }> {
   try {
     const client = createFreeboxClient(cfg);
     await client.getApiVersion();
@@ -212,6 +227,7 @@ export async function testFreeboxConnection(cfg: FreeboxSettings): Promise<{ ok:
     await client.closeSession();
     return { ok: true };
   } catch (err) {
+    log?.error({ err }, 'Freebox test connection failed');
     return { ok: false, error: err instanceof Error ? err.message : 'Erreur inconnue' };
   }
 }
@@ -223,7 +239,7 @@ export async function startFreeboxAuthorization(cfg: FreeboxSettings): Promise<{
 }
 
 /** Check Freebox authorization status */
-export async function checkFreeboxAuthorization(cfg: FreeboxSettings, trackId: number): Promise<{ granted: boolean; app_token?: string }> {
+export async function checkFreeboxAuthorization(cfg: FreeboxSettings, trackId: number): Promise<{ granted: boolean; status: 'unknown' | 'pending' | 'timeout' | 'granted' | 'denied'; app_token?: string }> {
   const client = createFreeboxClient(cfg);
   return client.checkAuthorization(trackId);
 }

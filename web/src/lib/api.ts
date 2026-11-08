@@ -17,6 +17,34 @@ export interface AptReport {
   autoremovable?: string[];
 }
 
+export interface InstalledSoftware {
+  name: string;
+  version?: string;
+  publisher?: string;
+  source: 'winget' | 'registry';
+}
+
+export interface WingetUpdate {
+  id: string;
+  name: string;
+  current?: string;
+  available?: string;
+  source?: string;
+}
+
+export interface WindowsUpdate {
+  title: string;
+  kbArticleId?: string;
+  size?: number;
+  severity?: string;
+}
+
+export interface PendingUpdates {
+  checkedAt: number;
+  winget: WingetUpdate[];
+  windows: WindowsUpdate[];
+}
+
 export interface HostInfo {
   hostname: string;
   osId: string;
@@ -218,6 +246,19 @@ export interface HealthOverviewHost {
   samples: { sampledAt: string; report: HealthSystem }[];
 }
 
+export interface FreeboxHealthReport {
+  checkedAt: number;
+  tempC?: number;
+  downRate?: number;
+  upRate?: number;
+  diskUsedPercent?: number;
+  diskUsedBytes?: number;
+  diskTotalBytes?: number;
+  lanDevices?: number;
+  vmRunning?: number;
+  vmTotal?: number;
+}
+
 // UPS reported by the agent (NUT); numbers are absent when the UPS does not report them.
 export interface UpsReport {
   checkedAt: number;
@@ -379,6 +420,10 @@ export interface Host {
   // Windows: user sessions, last report of the agent (null: none yet)
   sessions: SessionReport | null;
   sessionSummary: { users: string[]; loggedIn: boolean; locked: boolean; interactive: boolean; changedAt: number | null } | null;
+  // Windows: installed applications (winget or registry fallback)
+  installedSoftware: InstalledSoftware[];
+  // Windows: pending updates from winget and Windows Update
+  pendingUpdates: PendingUpdates | null;
 }
 
 export interface HostSession {
@@ -466,7 +511,7 @@ export interface SetupProfile {
 }
 
 export type StackAction = 'docker_up' | 'docker_stop' | 'docker_restart' | 'docker_update';
-export type JobAction = 'apt_report' | 'apt_update' | 'apt_upgrade' | 'apt_autoremove' | 'reboot' | 'shutdown' | 'lock' | 'agent_update' | 'docker_check' | StackAction | 'setup_apply' | 'backup_run' | 'backup_install' | 'offsite_run';
+export type JobAction = 'apt_report' | 'apt_update' | 'apt_upgrade' | 'apt_autoremove' | 'reboot' | 'shutdown' | 'lock' | 'winget_upgrade' | 'windows_update' | 'agent_update' | 'docker_check' | StackAction | 'setup_apply' | 'backup_run' | 'backup_install' | 'offsite_run';
 export type JobStatus = 'running' | 'success' | 'failed';
 
 export interface Job {
@@ -679,6 +724,7 @@ export interface FreeboxAuthorizeResult {
 
 export interface FreeboxAuthCheckResult {
   granted: boolean;
+  status: 'unknown' | 'pending' | 'timeout' | 'granted' | 'denied';
   app_token?: string;
 }
 
@@ -1549,7 +1595,8 @@ export const api = {
     request<FreeboxSettings>('PUT', '/api/settings/freebox', patch),
   testFreebox: () => request<{ ok: boolean; error?: string }>('POST', '/api/settings/freebox/test'),
   authorizeFreebox: () => request<FreeboxAuthorizeResult>('POST', '/api/settings/freebox/authorize'),
-  checkFreeboxAuthorization: (track_id: number) => request<FreeboxAuthCheckResult>('POST', '/api/settings/freebox/authorize/check', { track_id }),
+  checkFreeboxAuthorization: (track_id: number, app_token?: string) =>
+    request<FreeboxAuthCheckResult>('POST', '/api/settings/freebox/authorize/check', app_token ? { track_id, app_token } : { track_id }),
 
   jobs: (limit = 100) => request<Job[]>('GET', `/api/jobs?limit=${limit}`),
   hostJobs: (id: string) => request<Job[]>('GET', `/api/hosts/${id}/jobs`),
@@ -1576,6 +1623,7 @@ export const api = {
   updateEquipment: (id: string, e: EquipmentInput) => request<Equipment>('PATCH', `/api/equipments/${id}`, e),
   deleteEquipment: (id: string) => request<void>('DELETE', `/api/equipments/${id}`),
   equipmentAlerts: (id: string) => request<{ days: HostAlertDay[] }>('GET', `/api/equipments/${id}/alerts`),
+  equipmentHealth: (id: string, hours = 24) => request<{ samples: { sampledAt: string; report: FreeboxHealthReport }[] }>('GET', `/api/equipments/${id}/health?hours=${hours}`),
   hostHealth:  (id: string, hours = 1) => request<{ samples: { category: 'system' | 'disks' | 'smart' | 'raid'; sampledAt: string; report: HealthSystem | HealthDisks | HealthSmart | HealthRaid }[] }>('GET', `/api/hosts/${id}/health?hours=${hours}`),
   saveHostSmartDevices: (id: string, devices: string[]) => request<{ devices: string[] }>('PUT', `/api/hosts/${id}/health/smart`, { devices }),
   silenceHealthAlerts: (id: string, keys: string[], silenced: boolean) => request<{ healthSilenced: { key: string; level: 'warn' | 'alert' }[] }>('PUT', `/api/hosts/${id}/health/silenced`, { keys, silenced }),
@@ -1599,6 +1647,10 @@ export const api = {
   job: (id: string) => request<Job>('GET', `/api/jobs/${id}`),
   runJob: (hostId: string, action: JobAction, packages?: string[], target?: { stack: string; service?: string } | { sessionId: number }) =>
     request<Job>('POST', `/api/hosts/${hostId}/jobs`, { action, packages, ...target }),
+  runWingetUpdates: (hostId: string, id?: string) =>
+    request<Job>('POST', `/api/hosts/${hostId}/updates/winget`, id ? { id } : {}),
+  runWindowsUpdates: (hostId: string) =>
+    request<Job>('POST', `/api/hosts/${hostId}/updates/windows`),
 
   stackLogs: (hostId: string, stack: string, service: string | undefined, tail: number) =>
     request<{ logs: string }>(

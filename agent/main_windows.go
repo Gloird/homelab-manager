@@ -14,8 +14,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +52,13 @@ func main() {
 	// the helper that locks the session it runs in (power_windows.go)
 	if len(os.Args) == 2 && os.Args[1] == "lock-session" {
 		if err := lockWorkStation(); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	// helper for winget execution in an interactive user session (service fallback)
+	if len(os.Args) > 2 && os.Args[1] == "winget-proxy" {
+		if err := runWingetProxy(os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -197,6 +206,8 @@ type session struct {
 	client bool
 }
 
+var jobLock sync.Mutex
+
 func (s *session) send(ctx context.Context, m Outbound) error {
 	b, _ := json.Marshal(m)
 	s.mu.Lock()
@@ -209,9 +220,15 @@ func (s *session) send(ctx context.Context, m Outbound) error {
 func (s *session) hello(ctx context.Context) error {
 	// backups: backup_setup (the hub may send definitions), backup_connect (jobs run on connection),
 	// "backup" and backup:cli once the CLI named by the definition is there
-	caps := []string{"refresh", "session", "health", "agent_update", "reboot", "shutdown", "lock", "backup_setup", "backup_connect", "backup_retry"}
+	caps := []string{"refresh", "session", "health", "software_inventory", "agent_update", "reboot", "shutdown", "lock", "backup_setup", "backup_connect", "backup_retry"}
 	if _, err := findSmartctl(); err == nil {
 		caps = append(caps, "smart")
+	}
+	if wingetPath() != "" {
+		caps = append(caps, "updates_winget")
+	}
+	if _, err := exec.LookPath("powershell.exe"); err == nil {
+		caps = append(caps, "updates_windows")
 	}
 	// UPS seen as a battery by Windows (ups_windows.go), re-evaluated at each hello; read only
 	if hasUps(ctx) {
@@ -270,6 +287,34 @@ func (s *session) sessions(ctx context.Context, force bool) {
 	_ = s.send(ctx, Outbound{Type: "session_report", Sessions: r})
 }
 
+func (s *session) softwareReport(ctx context.Context) {
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	r, err := collectInstalledSoftware(cctx)
+	if err != nil {
+		log.Printf("software report failed: %v", err)
+		return
+	}
+	_ = s.send(ctx, Outbound{Type: "software_report", InstalledSoftware: r})
+}
+
+func (s *session) updatesReport(ctx context.Context) {
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	out := &PendingUpdatesReport{CheckedAt: time.Now().UnixMilli(), Winget: []WingetUpdate{}, Windows: []WindowsUpdate{}}
+	if list, err := collectWingetUpdates(cctx); err == nil {
+		out.Winget = list
+	} else if wingetPath() != "" {
+		log.Printf("winget updates report failed: %v", err)
+	}
+	if list, err := collectWindowsUpdates(cctx); err == nil {
+		out.Windows = list
+	} else if _, lookErr := exec.LookPath("powershell.exe"); lookErr == nil {
+		log.Printf("windows updates report failed: %v", err)
+	}
+	_ = s.send(ctx, Outbound{Type: "pending_updates_report", PendingUpdates: out})
+}
+
 func (s *session) loop(ctx context.Context) error {
 	if err := s.hello(ctx); err != nil {
 		return err
@@ -281,6 +326,8 @@ func (s *session) loop(ctx context.Context) error {
 	backups.attach(func(o Outbound) error { return s.send(ctx, o) })
 	defer backups.detach()
 	s.sessions(ctx, true)
+	go s.softwareReport(ctx)
+	go s.updatesReport(ctx)
 	go func() {
 		helloT := time.NewTicker(30 * time.Minute)
 		// safety net behind the notifications of the service (and the only source in a console)
@@ -293,6 +340,8 @@ func (s *session) loop(ctx context.Context) error {
 				return
 			case <-helloT.C:
 				_ = s.hello(ctx)
+				s.softwareReport(ctx)
+				s.updatesReport(ctx)
 			case <-pollT.C:
 				s.sessions(ctx, false)
 			case <-sessionKick:
@@ -323,8 +372,10 @@ func (s *session) loop(ctx context.Context) error {
 			if in.Op == "refresh" {
 				_ = s.hello(ctx)
 				s.sessions(ctx, true)
+				s.softwareReport(ctx)
+				s.updatesReport(ctx)
 				s.refreshHealth(ctx)
-				scopes := []string{"info", "session", "health"}
+				scopes := []string{"info", "session", "software", "updates", "health"}
 				if r := collectUps(ctx); r != nil {
 					_ = s.send(ctx, Outbound{Type: "ups_report", Ups: r})
 					scopes = append(scopes, "ups")
@@ -373,6 +424,36 @@ func (s *session) run(ctx context.Context, in Inbound) {
 		return
 	case "lock":
 		go s.lock(ctx, in, emit)
+		return
+	case "winget_upgrade", "windows_update":
+		go func() {
+			jobLock.Lock()
+			defer jobLock.Unlock()
+			jctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
+			defer cancel()
+			var code int
+			var err error
+			if in.Action == "winget_upgrade" {
+				if len(in.Packages) == 0 {
+					emit("winget upgrade --all --silent\n")
+				} else {
+					emit(fmt.Sprintf("winget upgrade (%d package(s))\n", len(in.Packages)))
+				}
+				code, err = runWingetUpgrade(jctx, emit, in.Packages)
+			} else {
+				emit("installing pending Windows updates\n")
+				code, err = runWindowsUpdateInstall(jctx, emit)
+			}
+			if strings.HasPrefix(in.Action, "winget_") {
+				s.softwareReport(ctx)
+			}
+			s.updatesReport(ctx)
+			o := Outbound{Type: "job_done", JobID: in.JobID, ExitCode: code}
+			if err != nil {
+				o.Error = err.Error()
+			}
+			_ = s.send(ctx, o)
+		}()
 		return
 	}
 	if in.Action != "agent_update" {

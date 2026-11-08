@@ -1,5 +1,5 @@
 // Freebox Settings Panel Component
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Activity, Wifi } from 'lucide-react';
 import { api, type FreeboxSettings } from '../lib/api';
@@ -9,9 +9,22 @@ import { useToast } from '../lib/toast';
 export function FreeboxSettingsPanel() {
   const { data: freeboxSettings } = useQuery({ queryKey: ['settings', 'freebox'], queryFn: api.freeboxSettings });
   const [draft, setDraft] = useState<Partial<FreeboxSettings> | null>(null);
-  const [authorizing, setAuthorizing] = useState<{ track_id: number; interval: NodeJS.Timeout } | null>(null);
+  const [authorizing, setAuthorizing] = useState<{ track_id: number; app_token: string } | null>(null);
+  const authorizeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toast = useToast();
   const qc = useQueryClient();
+
+  const stopAuthorizationPolling = () => {
+    if (authorizeIntervalRef.current) {
+      clearInterval(authorizeIntervalRef.current);
+      authorizeIntervalRef.current = null;
+    }
+    setAuthorizing(null);
+  };
+
+  useEffect(() => () => {
+    if (authorizeIntervalRef.current) clearInterval(authorizeIntervalRef.current);
+  }, []);
 
   const handleSave = async () => {
     if (!draft) return;
@@ -41,20 +54,32 @@ export function FreeboxSettingsPanel() {
   const handleAuthorize = async () => {
     if (!freeboxSettings) return;
     try {
-      const { track_id } = await api.authorizeFreebox();
-      setAuthorizing({ track_id, interval: setInterval(async () => {
+      const { track_id, app_token } = await api.authorizeFreebox();
+      const startedAt = Date.now();
+      stopAuthorizationPolling();
+      setAuthorizing({ track_id, app_token });
+      authorizeIntervalRef.current = setInterval(async () => {
         try {
-          const result = await api.checkFreeboxAuthorization(track_id);
+          const result = await api.checkFreeboxAuthorization(track_id, app_token);
           if (result.granted) {
-            clearInterval(authorizing!.interval);
-            setAuthorizing(null);
-            qc.invalidateQueries({ queryKey: ['settings', 'freebox'] });
+            stopAuthorizationPolling();
+            await qc.invalidateQueries({ queryKey: ['settings', 'freebox'] });
             toast.success('Autorisation accordée ! La Freebox est maintenant connectée.');
+            return;
+          }
+          if (result.status === 'denied') {
+            stopAuthorizationPolling();
+            toast.error('Autorisation refusée sur la Freebox.');
+            return;
+          }
+          if (result.status === 'timeout' || Date.now() - startedAt >= 120_000) {
+            stopAuthorizationPolling();
+            toast.error('La demande d\'autorisation a expiré. Relancez-la.');
           }
         } catch {
           // Ignore errors during polling
         }
-      }, 2000) });
+      }, 2000);
       toast.success('Autorisation demandée. Validez sur l\'écran de la Freebox (vous avez 2 minutes).');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erreur lors de la demande d\'autorisation');
@@ -63,8 +88,7 @@ export function FreeboxSettingsPanel() {
 
   const handleCancelAuthorize = () => {
     if (authorizing) {
-      clearInterval(authorizing.interval);
-      setAuthorizing(null);
+      stopAuthorizationPolling();
       toast.success('Demande d\'autorisation annulée');
     }
   };
@@ -98,12 +122,12 @@ export function FreeboxSettingsPanel() {
               <input
                 id="freebox-url"
                 type="text"
-                value={draft?.url ?? freeboxSettings?.url ?? 'https://mafreebox.freebox.fr'}
+                value={draft?.url ?? freeboxSettings?.url ?? 'http://mafreebox.freebox.fr'}
                 onChange={(e) => setDraft({ ...draft, url: e.target.value })}
                 className="input w-full"
-                placeholder="https://mafreebox.freebox.fr"
+                placeholder="http://mafreebox.freebox.fr"
               />
-              <p className="text-xs text-muted mt-1">Ex: https://mafreebox.freebox.fr ou https://&lt;domaine&gt;.fbxos.fr:port</p>
+              <p className="text-xs text-muted mt-1">Ex: http://mafreebox.freebox.fr ou https://&lt;domaine&gt;.fbxos.fr:port</p>
 </div>
             <div>
               <label htmlFor="freebox-api-version" className="block text-xs text-muted mb-1">Version API</label>

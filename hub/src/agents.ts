@@ -18,6 +18,7 @@ import { isSeriesReport, onOffsiteHello, onOffsiteReport, onOffsiteSynced } from
 import { onMountHello } from './pbsMount.js';
 import { isUpsReport } from './ups.js';
 import { isSessionReport } from './sessions.js';
+import { isInstalledSoftwareReport, isPendingUpdates } from './windowsReports.js';
 import { healthConfigForHost, receiveHealthReport } from './health.js';
 import { randomUUID } from 'node:crypto';
 import { BROKER_SCHEMES, type AptReport, type HostDoc, type HostInfo, type RoleCandidate } from './types.js';
@@ -167,6 +168,8 @@ interface AgentMessage {
   offsite?: unknown;
   ups?: unknown;
   sessions?: unknown;
+  installedSoftware?: unknown;
+  pendingUpdates?: unknown;
   healthSystem?: unknown;
   healthDisks?: unknown;
   healthSmart?: unknown;
@@ -312,6 +315,16 @@ export function registerAgentSocket(app: FastifyInstance) {
             case 'session_report':
               if (!isSessionReport(msg.sessions)) return;
               await hosts.updateOne({ _id: host._id }, { $set: { sessions: msg.sessions, lastSeenAt: new Date() } });
+              await emitHost(host._id);
+              break;
+            case 'software_report':
+              if (!isInstalledSoftwareReport(msg.installedSoftware)) return;
+              await hosts.updateOne({ _id: host._id }, { $set: { installedSoftware: msg.installedSoftware.items, lastSeenAt: new Date() } });
+              await emitHost(host._id);
+              break;
+            case 'pending_updates_report':
+              if (!isPendingUpdates(msg.pendingUpdates)) return;
+              await hosts.updateOne({ _id: host._id }, { $set: { pendingUpdates: msg.pendingUpdates, lastSeenAt: new Date() } });
               await emitHost(host._id);
               break;
             case 'ups_report':

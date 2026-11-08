@@ -11,6 +11,7 @@ export const keys = {
   hostAlerts: (id: string) => ['host-alerts', id] as const,
   equipments: ['equipments'] as const,
   equipmentAlerts: (id: string) => ['equipment-alerts', id] as const,
+  equipmentHealth: (id: string, hours: number) => ['equipment-health', id, hours] as const,
   alerts: ['alerts'] as const,
   status: ['status'] as const,
   sites: ['sites'] as const,

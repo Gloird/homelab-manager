@@ -128,6 +128,7 @@ function PackagesPanel({ host, upgrading, running, onStarted }: { host: Host; up
           </Button>
         </div>
       }
+
     >
       {(rebootPkgs.length > 0 || (host.apt?.held.length ?? 0) > 0 || listsStale(host)) && (
         <div className="space-y-2 border-b border-line px-4 py-3 text-sm">
@@ -204,6 +205,108 @@ function PackagesPanel({ host, upgrading, running, onStarted }: { host: Host; up
                       <span className="whitespace-nowrap text-xs text-muted">À installer</span>
                     )}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function WindowsUpdatesPanel({ host, running, onStarted }: { host: Host; running: boolean; onStarted: (jobId: string) => void }) {
+  const run = useRunJob();
+  const { canWrite } = useMe();
+  const updates = host.pendingUpdates;
+  const winget = updates?.winget ?? [];
+  const windows = updates?.windows ?? [];
+  return (
+    <Panel
+      title={<>Mises à jour Windows <span className="text-muted">({winget.length + windows.length})</span></>}
+      icon={ArrowUpCircle}
+      actions={canWrite ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" icon={ArrowUpCircle} disabled={!host.online || running} loading={run.isPending && run.variables?.action === 'winget_upgrade'} onClick={() => run.mutate({ hostId: host.id, action: 'winget_upgrade' }, { onSuccess: (j) => onStarted(j.id) })}>
+            Tout mettre à jour (Winget)
+          </Button>
+          <Button size="sm" icon={ArrowUpCircle} disabled={!host.online || running} loading={run.isPending && run.variables?.action === 'windows_update'} onClick={() => run.mutate({ hostId: host.id, action: 'windows_update' }, { onSuccess: (j) => onStarted(j.id) })}>
+            Installer les KB Windows
+          </Button>
+        </div>
+      ) : undefined}
+    >
+      {!updates ? (
+        <Empty icon={ArrowUpCircle} title="Pas encore de relevé">L'agent n'a pas encore envoyé les mises à jour Windows.</Empty>
+      ) : (
+        <div className="grid gap-4 p-4 md:grid-cols-2">
+          <div className="rounded-md border border-line">
+            <div className="border-b border-line px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">Winget</div>
+            {winget.length === 0 ? <div className="px-3 py-3 text-sm text-muted">Aucune mise à jour.</div> : (
+              <div className="max-h-64 overflow-auto">
+                {winget.map((u) => (
+                  <div key={`${u.id}:${u.available ?? ''}`} className="border-b border-line px-3 py-2 last:border-b-0">
+                    <div className="text-sm text-zinc-100">{u.name}</div>
+                    <div className="font-mono text-xs text-muted">{u.id} · {u.current ?? '?'} → {u.available ?? '?'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded-md border border-line">
+            <div className="border-b border-line px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">Windows Update</div>
+            {windows.length === 0 ? <div className="px-3 py-3 text-sm text-muted">Aucun correctif en attente.</div> : (
+              <div className="max-h-64 overflow-auto">
+                {windows.map((u, idx) => (
+                  <div key={`${u.kbArticleId ?? idx}:${u.title}`} className="border-b border-line px-3 py-2 last:border-b-0">
+                    <div className="text-sm text-zinc-100">{u.kbArticleId ? `${u.kbArticleId} · ${u.title}` : u.title}</div>
+                    <div className="text-xs text-muted">{u.severity || 'sévérité non précisée'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function InstalledSoftwarePanel({ host }: { host: Host }) {
+  const [q, setQ] = useState('');
+  const all = host.installedSoftware ?? [];
+  const list = all.filter((x) => {
+    const n = q.trim().toLowerCase();
+    return !n || x.name.toLowerCase().includes(n) || (x.publisher ?? '').toLowerCase().includes(n);
+  });
+  return (
+    <Panel title={<>Logiciels installés <span className="text-muted">({all.length})</span></>} icon={Package}>
+      <div className="border-b border-line p-3">
+        <div className="relative w-full max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input className="input h-9 py-0 pl-9" placeholder="Filtrer (nom, éditeur)" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      </div>
+      {list.length === 0 ? (
+        <Empty icon={Package} title={all.length ? 'Aucun logiciel ne correspond' : 'Aucun logiciel remonté'} />
+      ) : (
+        <div className="max-h-80 overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-line">
+              <tr>
+                <th className="th">Nom</th>
+                <th className="th">Éditeur</th>
+                <th className="th">Version</th>
+                <th className="th">Source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {list.map((s) => (
+                <tr key={`${s.name}:${s.version ?? ''}:${s.publisher ?? ''}`}>
+                  <td className="td text-zinc-100">{s.name}</td>
+                  <td className="td text-zinc-300">{s.publisher || '—'}</td>
+                  <td className="td font-mono text-xs text-zinc-300">{s.version || '—'}</td>
+                  <td className="td"><Badge>{s.source}</Badge></td>
                 </tr>
               ))}
             </tbody>
@@ -397,9 +500,11 @@ function HostDetailPage({ id }: { id: string }) {
   if (host.capabilities.includes('health')) blocks.push(<HealthPanel key="health" host={host} canManage={canManage} />);
   if (host.ups) blocks.push(<UpsPanel key="ups" hostId={host.id} ups={host.ups} canControl={!!host.capabilities?.includes('ups_control')} />);
   if (hasApt(host)) blocks.push(<PackagesPanel key="apt" host={host} upgrading={jobs?.find((j) => j.status === 'running' && j.action === 'apt_upgrade')} running={!!running} onStarted={setJobId} />);
+  if (isWindows(host)) blocks.push(<WindowsUpdatesPanel key="windows-updates" host={host} running={!!running} onStarted={setJobId} />);
   if (host.docker) blocks.push(<DockerPanel key="docker" host={host} running={!!running} onStarted={setJobId} />);
   blocks.push(<ProbesPanel key="probes" owner={{ kind: 'host', host }} />);
   if (isWindows(host)) blocks.push(<SessionsPanel key="sessions" host={host} />);
+  if (isWindows(host)) blocks.push(<InstalledSoftwarePanel key="software" host={host} />);
   else if (!hasApt(host) && !host.docker) {
     blocks.push(
       <Panel key="system" title="Système" icon={Package}>

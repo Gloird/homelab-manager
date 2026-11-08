@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ObjectId } from 'mongodb';
 import { equipmentAlertDays } from '../alerts.js';
 import { loadSites, sameName } from '../catalog.js';
-import { equipments, parseId, probes } from '../db.js';
+import { equipments, freeboxMetrics, parseId, probes } from '../db.js';
 import { SOURCE_FIELDS, equipmentDto, ipError, removeEquipment, uplinkError } from '../equipments.js';
 import { publish } from '../events.js';
 import { INTERVAL_RANGE, TIMEOUT_RANGE } from '../probes.js';
@@ -85,6 +85,20 @@ export function registerEquipmentRoutes(app: FastifyInstance) {
     const _id = parseId(req.params.id);
     if (!_id || !(await equipments.countDocuments({ _id }, { limit: 1 }))) return reply.code(404).send({ error: 'equipment not found' });
     return { days: await equipmentAlertDays(_id) };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { hours?: string } }>('/api/equipments/:id/health', async (req, reply) => {
+    const _id = parseId(req.params.id);
+    const equipment = _id && (await equipments.findOne({ _id }));
+    if (!equipment) return reply.code(404).send({ error: 'equipment not found' });
+    if (equipment.source !== 'freebox') return { samples: [] };
+    const hoursRaw = Number.parseInt(req.query.hours ?? '24', 10);
+    const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(24 * 7, hoursRaw)) : 24;
+    const since = new Date(Date.now() - hours * 3600_000);
+    const samples = await freeboxMetrics.find({ equipmentId: _id, sampledAt: { $gte: since } }).sort({ sampledAt: 1 }).toArray();
+    return {
+      samples: samples.map((sample) => ({ sampledAt: sample.sampledAt, report: sample.report })),
+    };
   });
 
   app.post<{ Body: Body }>('/api/equipments', { schema: { body: createBody } }, async (req, reply) => {

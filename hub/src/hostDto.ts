@@ -67,6 +67,10 @@ export function hostDto(h: HostDoc) {
     // Windows: user sessions, and what they mean (someone logged on, all locked)
     sessions: h.sessions ?? null,
     sessionSummary: sessionSummary(h.sessions),
+    // Windows: installed applications (winget, or registry fallback)
+    installedSoftware: h.installedSoftware ?? [],
+    // Windows: pending updates of winget and Windows Update
+    pendingUpdates: h.pendingUpdates ?? null,
     // computed on read so that reports stored by older hub versions are covered too
     apt: h.apt ? { ...h.apt, upgradable: h.apt.upgradable.map((p) => ({ ...p, reboot: needsReboot(p.name) })) } : null,
     aptSummary: h.apt ? summarize(h.apt) : null,

@@ -24,9 +24,12 @@ export async function maybeAutoUpdate(id: ObjectId) {
   if (!(await loadAgentSettings()).autoUpdate) return false;
   const h = await hosts.findOne({ _id: id });
   if (!h || !canSelfUpdate(h) || agentOutdated(h) !== true) return false;
+  const bin = hostBinary(h);
+  // A release agent checks signatures: without .sig files on the hub, scheduled updates only fail in a loop.
+  if (!bin?.signed) return false;
   const hid = h._id.toHexString();
   if (!isOnline(hid) || hasRunningJob(hid)) return false;
-  const target = hostBinary(h)?.sha256;
+  const target = bin.sha256;
   if (h.lastAgentUpdateAt && h.lastAgentUpdateHash === target && Date.now() - h.lastAgentUpdateAt.getTime() < RETRY_MS) return false;
   await hosts.updateOne({ _id: h._id }, { $set: { lastAgentUpdateAt: new Date(), lastAgentUpdateHash: target } });
   await createJob(h, 'agent_update', [], 'schedule');

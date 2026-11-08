@@ -6,7 +6,7 @@ import { publish } from './events.js';
 import type { HostDoc, JobAction, JobDoc, SetupOption } from './types.js';
 
 const MAX_LOG = 512 * 1024;
-const PKG_RE = /^[a-z0-9][a-z0-9+.\-:]*$/;
+const PKG_RE = /^[A-Za-z0-9][A-Za-z0-9+._\-:]*$/;
 
 // Logs of running jobs live in memory and are flushed to Mongo periodically.
 interface Running {

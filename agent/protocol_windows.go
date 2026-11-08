@@ -26,36 +26,73 @@ type SessionReport struct {
 	Sessions  []Session `json:"sessions"`
 }
 
+type InstalledSoftware struct {
+	Name      string `json:"name"`
+	Version   string `json:"version,omitempty"`
+	Publisher string `json:"publisher,omitempty"`
+	Source    string `json:"source"` // winget | registry
+}
+
+type InstalledSoftwareReport struct {
+	CheckedAt int64               `json:"checkedAt"` // unix ms
+	Items     []InstalledSoftware `json:"items"`
+}
+
+type WingetUpdate struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Current   string `json:"current,omitempty"`
+	Available string `json:"available,omitempty"`
+	Source    string `json:"source,omitempty"`
+}
+
+type WindowsUpdate struct {
+	Title       string `json:"title"`
+	KBArticleID string `json:"kbArticleId,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+	Severity    string `json:"severity,omitempty"`
+}
+
+type PendingUpdatesReport struct {
+	CheckedAt int64           `json:"checkedAt"` // unix ms
+	Winget    []WingetUpdate  `json:"winget"`
+	Windows   []WindowsUpdate `json:"windows"`
+}
+
 // agent -> hub
 type Outbound struct {
-	Type         string         `json:"type"` // hello | session_report | rpc_result | job_log | job_done | backup_synced | backup_result | ups_report
-	Version      string         `json:"version,omitempty"`
-	Info         *HostInfo      `json:"info,omitempty"`
-	Capabilities []string       `json:"capabilities,omitempty"`
-	BinaryHash   string         `json:"binaryHash,omitempty"`
-	Sessions     *SessionReport `json:"sessions,omitempty"`
-	Ups          *UpsReport     `json:"ups,omitempty"`
-	HealthSystem *HealthSystem  `json:"healthSystem,omitempty"`
-	HealthDisks  *HealthDisks   `json:"healthDisks,omitempty"`
-	HealthSmart  *HealthSmart   `json:"healthSmart,omitempty"`
-	HealthRaid   *HealthRaid    `json:"healthRaid,omitempty"`
-	ReqID        string         `json:"reqId,omitempty"`
-	Result       any            `json:"result,omitempty"`
-	JobID        string         `json:"jobId,omitempty"`
-	Data         string         `json:"data,omitempty"`
-	ExitCode     int            `json:"exitCode,omitempty"`
-	Error        string         `json:"error,omitempty"`
+	Type              string                   `json:"type"` // hello | session_report | software_report | pending_updates_report | rpc_result | job_log | job_done | backup_synced | backup_result | ups_report
+	Version           string                   `json:"version,omitempty"`
+	Info              *HostInfo                `json:"info,omitempty"`
+	Capabilities      []string                 `json:"capabilities,omitempty"`
+	BinaryHash        string                   `json:"binaryHash,omitempty"`
+	Sessions          *SessionReport           `json:"sessions,omitempty"`
+	InstalledSoftware *InstalledSoftwareReport `json:"installedSoftware,omitempty"`
+	PendingUpdates    *PendingUpdatesReport    `json:"pendingUpdates,omitempty"`
+	Ups               *UpsReport               `json:"ups,omitempty"`
+	HealthSystem      *HealthSystem            `json:"healthSystem,omitempty"`
+	HealthDisks       *HealthDisks             `json:"healthDisks,omitempty"`
+	HealthSmart       *HealthSmart             `json:"healthSmart,omitempty"`
+	HealthRaid        *HealthRaid              `json:"healthRaid,omitempty"`
+	ReqID             string                   `json:"reqId,omitempty"`
+	Result            any                      `json:"result,omitempty"`
+	JobID             string                   `json:"jobId,omitempty"`
+	Data              string                   `json:"data,omitempty"`
+	ExitCode          int                      `json:"exitCode,omitempty"`
+	Error             string                   `json:"error,omitempty"`
 }
 
 // hub -> agent
 type Inbound struct {
-	Type   string   `json:"type"` // run | rpc | backup_sync | backup_result_ack (anything else is ignored)
-	JobID  string   `json:"jobId"`
-	Action string   `json:"action"`
-	ReqID  string   `json:"reqId,omitempty"`
-	Op     string   `json:"op,omitempty"`
-	Scopes []string `json:"scopes,omitempty"`
-	Sha256 string   `json:"sha256,omitempty"` // agent_update: expected hash of the new binary
+	Type   string `json:"type"` // run | rpc | backup_sync | backup_result_ack (anything else is ignored)
+	JobID  string `json:"jobId"`
+	Action string `json:"action"`
+	// apt_upgrade, winget_upgrade: package ids (empty: all updates)
+	Packages []string `json:"packages,omitempty"`
+	ReqID    string   `json:"reqId,omitempty"`
+	Op       string   `json:"op,omitempty"`
+	Scopes   []string `json:"scopes,omitempty"`
+	Sha256   string   `json:"sha256,omitempty"` // agent_update: expected hash of the new binary
 	// lock: the session to lock
 	SessionID *uint32 `json:"sessionId,omitempty"`
 	// backup_sync: the whole definition of the backups of this host (backup.go)

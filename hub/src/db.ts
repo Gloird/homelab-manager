@@ -1,6 +1,6 @@
 import { MongoClient, ObjectId, type Collection } from 'mongodb';
 import { config } from './config.js';
-import type { AgentSettings, BackupDoc, BackupStatDoc, StorageUsageDoc, BackupJobDoc, EquipmentAlertDoc, EquipmentDoc, FreeboxSettings, GuestDoc, HealthMetricDoc, HealthSettings, HostAlertDoc, PveSettings, HomeAssistantSettings, HostDoc, JobDoc, PbsSettings, PbsRemoteSettings, ProbeDayDoc, ProbeDoc, ProbeMeasureDoc, PkiDoc, ApiKeyDoc, StoredRoleDoc, OmadaStateDoc, SessionDoc, SetupProfile, SitesSettings, TagsSettings, UserDoc } from './types.js';
+import type { AgentSettings, BackupDoc, BackupStatDoc, StorageUsageDoc, BackupJobDoc, EquipmentAlertDoc, EquipmentDoc, FreeboxMetricDoc, FreeboxSettings, GuestDoc, HealthMetricDoc, HealthSettings, HostAlertDoc, PveSettings, HomeAssistantSettings, HostDoc, JobDoc, PbsSettings, PbsRemoteSettings, ProbeDayDoc, ProbeDoc, ProbeMeasureDoc, PkiDoc, ApiKeyDoc, StoredRoleDoc, OmadaStateDoc, SessionDoc, SetupProfile, SitesSettings, TagsSettings, UserDoc } from './types.js';
 
 const client = new MongoClient(config.mongoUrl);
 
@@ -22,6 +22,7 @@ export let probeDays: Collection<ProbeDayDoc>;
 export let probeMeasures: Collection<ProbeMeasureDoc>;
 export let equipments: Collection<EquipmentDoc>;
 export let equipmentAlerts: Collection<EquipmentAlertDoc>;
+export let freeboxMetrics: Collection<FreeboxMetricDoc>;
 export let roles: Collection<StoredRoleDoc>;
 export let omada: Collection<OmadaStateDoc>;
 
@@ -46,6 +47,7 @@ export async function connectDb() {
   probeMeasures = db.collection('probeMeasures');
   equipments = db.collection('equipments');
   equipmentAlerts = db.collection('equipmentAlerts');
+  freeboxMetrics = db.collection('freeboxMetrics');
   roles = db.collection('roles');
   omada = db.collection('omada');
 
@@ -90,6 +92,8 @@ export async function connectDb() {
     // same as the hosts
     equipmentAlerts.createIndex({ equipmentId: 1, day: 1 }, { unique: true }),
     equipmentAlerts.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'equipment_alerts_ttl' }),
+    freeboxMetrics.createIndex({ equipmentId: 1, sampledAt: -1 }),
+    freeboxMetrics.createIndex({ sampledAt: 1 }, { expireAfterSeconds: 7 * 24 * 3600, name: 'freebox_metrics_ttl' }),
     healthMetrics.createIndex({ hostId: 1, category: 1, sampledAt: -1 }),
     healthMetrics.createIndex({ sampledAt: 1 }, { expireAfterSeconds: 48 * 3600, name: 'health_metrics_ttl' }),
     // "role" was renamed "profile" (the roles are now the ones of the hub); accounts created before roles existed keep

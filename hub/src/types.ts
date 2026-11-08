@@ -30,6 +30,34 @@ export interface AptReport {
   autoremovable?: string[];
 }
 
+export interface InstalledSoftware {
+  name: string;
+  version?: string;
+  publisher?: string;
+  source: 'winget' | 'registry';
+}
+
+export interface WingetUpdate {
+  id: string;
+  name: string;
+  current?: string;
+  available?: string;
+  source?: string;
+}
+
+export interface WindowsUpdate {
+  title: string;
+  kbArticleId?: string;
+  size?: number;
+  severity?: string;
+}
+
+export interface PendingUpdates {
+  checkedAt: number;
+  winget: WingetUpdate[];
+  windows: WindowsUpdate[];
+}
+
 export interface HostInfo {
   hostname: string;
   osId: string;
@@ -327,6 +355,10 @@ export interface HostDoc {
   healthOverrides?: HealthOverrides;
   // Windows: user sessions (agent session_report)
   sessions?: SessionReport;
+  // Windows: installed applications (winget, else registry fallback)
+  installedSoftware?: InstalledSoftware[];
+  // Windows: pending updates from winget and Windows Update
+  pendingUpdates?: PendingUpdates;
   dockerUpdates?: DockerUpdates;
   lastDockerAutoCheckAt?: Date;
   // local images changed since the last registry check: a docker_check is due as soon as the host is free
@@ -480,6 +512,7 @@ export interface SetupState {
 export const APT_ACTIONS = ['apt_report', 'apt_update', 'apt_upgrade', 'apt_autoremove'] as const;
 // hosts without APT (Unraid...) do not announce apt_update
 export const hasApt = (h: { capabilities?: string[] }) => !!h.capabilities?.includes('apt_update');
+export const WINDOWS_ACTIONS = ['winget_upgrade', 'windows_update'] as const;
 export const DOCKER_ACTIONS = ['docker_up', 'docker_stop', 'docker_restart', 'docker_update'] as const;
 export const JOB_ACTIONS = [
   'apt_report',
@@ -489,6 +522,7 @@ export const JOB_ACTIONS = [
   'reboot',
   'shutdown',
   'lock',
+  ...WINDOWS_ACTIONS,
   'agent_update',
   'docker_check',
   ...DOCKER_ACTIONS,
@@ -667,7 +701,7 @@ export interface PbsSettings {
 export interface FreeboxSettings {
   _id: 'freebox';
   enabled: boolean;
-  // Base URL of the Freebox API (e.g. https://mafreebox.freebox.fr or https://<api_domain>:<port>)
+  // Base URL of the Freebox API (e.g. http://mafreebox.freebox.fr or https://<api_domain>:<port>)
   url: string;
   // Application token obtained during authorization (stored after user approves on Freebox)
   appToken: string;
@@ -684,6 +718,26 @@ export interface FreeboxSettings {
   // Last poll
   polledAt?: Date;
   pollError?: string | null;
+}
+
+export interface FreeboxMetricReport {
+  checkedAt: number;
+  tempC?: number;
+  downRate?: number;
+  upRate?: number;
+  diskUsedPercent?: number;
+  diskUsedBytes?: number;
+  diskTotalBytes?: number;
+  lanDevices?: number;
+  vmRunning?: number;
+  vmTotal?: number;
+}
+
+export interface FreeboxMetricDoc {
+  _id?: ObjectId;
+  equipmentId: ObjectId;
+  sampledAt: Date;
+  report: FreeboxMetricReport;
 }
 // sources whose groups are not on the PBS: the PBS poll, its disconnection, its mount and the copies leave them alone
 export const OFF_PBS_SOURCES = ['haos', 'pve-storage'] as const;

@@ -278,7 +278,7 @@ export function registerFreeboxSettingsRoutes(app: FastifyInstance) {
   app.post('/api/settings/freebox/test', async (req, reply) => {
     const cfg = await loadFreeboxSettings();
     if (!cfg) return reply.code(400).send({ ok: false, error: 'Freebox non configurée' });
-    return testFreeboxConnection(cfg);
+    return testFreeboxConnection(cfg, req.log);
   });
 
   // Start authorization (step 1)
@@ -288,20 +288,28 @@ export function registerFreeboxSettingsRoutes(app: FastifyInstance) {
       const { track_id, app_token } = await startFreeboxAuthorization(cfg);
       return { track_id, app_token };
     } catch (err) {
-      return reply.code(500).send({ error: err instanceof Error ? err.message : 'Erreur autorisation' });
+      // Log the full stack trace to the container stdout so docker logs catches it
+      req.log.error(err, 'Freebox authorization failed with stack trace:');
+      
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: (err instanceof Error ? err : new Error(String(err))).message,
+        stack: process.env.NODE_ENV === 'development' ? (err instanceof Error ? err.stack : undefined) : undefined
+      });
     }
   });
 
   // Check authorization (step 2 - poll)
-  app.post<{ Body: { track_id: number } }>('/api/settings/freebox/authorize/check', { schema: { body: { type: 'object', required: ['track_id'], additionalProperties: false, properties: { track_id: { type: 'integer' } } } } }, async (req, reply) => {
+  app.post<{ Body: { track_id: number; app_token?: string } }>('/api/settings/freebox/authorize/check', { schema: { body: { type: 'object', required: ['track_id'], additionalProperties: false, properties: { track_id: { type: 'integer' }, app_token: { type: 'string' } } } } }, async (req, reply) => {
     const cfg = await loadFreeboxSettings();
     if (!cfg) return reply.code(400).send({ error: 'Freebox non configurée' });
     try {
-      const { granted, app_token } = await checkFreeboxAuthorization(cfg, req.body.track_id);
-      if (granted && app_token) {
-        await saveFreeboxAppToken(app_token);
+      const { granted, status, app_token } = await checkFreeboxAuthorization(cfg, req.body.track_id);
+      const tokenToSave = app_token ?? req.body.app_token;
+      if (granted && tokenToSave) {
+        await saveFreeboxAppToken(tokenToSave);
       }
-      return { granted, app_token: app_token ? '***' : undefined };
+      return { granted, status, app_token: tokenToSave ? '***' : undefined };
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : 'Erreur vérification' });
     }

@@ -5,11 +5,12 @@ import clsx from 'clsx';
 import { ArrowLeft, RefreshCw, Router, Settings, Trash2 } from 'lucide-react';
 import { AlertTimeline } from '../components/AlertTimeline';
 import { EquipmentModal } from '../components/Equipment';
+import { FreeboxHealthPanel } from '../components/FreeboxHealthPanel';
 import { SOURCE_LABELS, TYPE_LABELS, equipmentTone, useSiteName } from '../lib/equipment';
 import { HeaderTitle } from '../components/HeaderSlot';
 import { StripItem } from '../components/StripItem';
 import { ProbesPanel } from '../components/Probes';
-import { Badge, Button, ConfirmModal, Empty, Spinner, StatusDot } from '../components/ui';
+import { Badge, Button, ConfirmModal, Empty, Panel, Spinner, StatusDot } from '../components/ui';
 import { api, type Equipment } from '../lib/api';
 import { useMe } from '../lib/auth';
 import { dateTime, timeAgo } from '../lib/format';
@@ -56,6 +57,8 @@ function EquipmentPage({ equipment: e }: { equipment: Equipment }) {
   const synced = e.source !== 'manual';
   // what the source reports (connection, load...), as the facts of the equipment
   const native = status?.equipments[e.id]?.domains.system;
+  const connectionCheck = native?.checks.find((c) => c.key === 'connection');
+  const sourceChecks = (native?.checks ?? []).filter((c) => c.key !== 'connection');
   const tone = equipmentTone(status, e);
   const uplink = all?.find((x) => x.id === e.uplinkId);
   const below = (all ?? []).filter((x) => x.uplinkId === e.id);
@@ -108,7 +111,7 @@ function EquipmentPage({ equipment: e }: { equipment: Equipment }) {
 
       <div className="space-y-5">
         <section className="panel">
-          <dl className="flex flex-wrap lg:flex-nowrap">
+          <dl className="flex flex-wrap">
             <StripItem label="Type">{TYPE_LABELS[e.type]}</StripItem>
             <StripItem label="Site">{siteName(e.siteId) ?? '—'}</StripItem>
             <StripItem label="Adresse IP"><span className="font-mono text-xs">{e.ip ?? '—'}</span></StripItem>
@@ -119,13 +122,13 @@ function EquipmentPage({ equipment: e }: { equipment: Equipment }) {
               <>
                 {!native || native.level === 'unknown' ? (
                   <StripItem label="Connexion"><span className="text-muted">{native?.reason ?? 'Pas encore synchronisé'}</span></StripItem>
+                ) : connectionCheck ? (
+                  <StripItem label={connectionCheck.label}>
+                    <Badge tone={levelTone[connectionCheck.level]}>{cellLabel[connectionCheck.level]}</Badge>
+                    {connectionCheck.reason && <span className="ml-1.5 text-xs text-muted">{connectionCheck.reason}</span>}
+                  </StripItem>
                 ) : (
-                  native.checks.map((c) => (
-                    <StripItem key={c.key} label={c.label}>
-                      <Badge tone={levelTone[c.level]}>{cellLabel[c.level]}</Badge>
-                      {c.reason && <span className="ml-1.5 text-xs text-muted">{c.reason}</span>}
-                    </StripItem>
-                  ))
+                  <StripItem label="Connexion"><span className="text-muted">—</span></StripItem>
                 )}
                 <StripItem label="Synchronisé">{e.native ? <span title={dateTime(e.native.syncedAt)}>{timeAgo(e.native.syncedAt)}</span> : '—'}</StripItem>
               </>
@@ -153,8 +156,24 @@ function EquipmentPage({ equipment: e }: { equipment: Equipment }) {
             )}
           </dl>
         </section>
+        {synced && native && native.level !== 'unknown' && sourceChecks.length > 0 && (
+          <Panel title="Statut source">
+            <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {sourceChecks.map((c) => (
+                <div key={c.key} className="rounded-md border border-line bg-raised/30 p-3">
+                  <dt className="text-xs text-muted">{c.label}</dt>
+                  <dd className="mt-1">
+                    <Badge tone={levelTone[c.level]}>{cellLabel[c.level]}</Badge>
+                    {c.reason && <span className="ml-1.5 text-xs text-muted">{c.reason}</span>}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </Panel>
+        )}
 
         <AlertTimeline kind="equipment" id={e.id} />
+        {e.source === 'freebox' && <FreeboxHealthPanel equipmentId={e.id} />}
         <ProbesPanel owner={{ kind: 'equipment', equipment: e }} />
       </div>
 

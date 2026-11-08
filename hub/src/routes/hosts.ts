@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { ObjectId } from 'mongodb';
 import { AgentRequestError, REFRESH_SCOPES, agentRequest, disconnectAgent, isOnline, refreshAgent, type RefreshScope } from '../agents.js';
+import { hostBinary } from '../agentBinaries.js';
 import { SERVICE_RE, STACK_RE, findStack, isExternal, isUnmanaged } from '../docker.js';
 import { randomToken, sha256 } from '../crypto.js';
 import { backups, equipments, healthMetrics, hosts, jobs, parseId, probes } from '../db.js';
@@ -16,7 +17,7 @@ import { forgetHost } from '../pbs.js';
 import { equipmentProbes, hostProbes } from '../probes.js';
 import { checkHostLinks } from '../catalog.js';
 import { applySetup, canSetup } from '../setup.js';
-import { APT_ACTIONS, DOCKER_ACTIONS, JOB_ACTIONS, SETUP_OPTIONS, hasApt, type AccessNetwork, type HaHostDetail, type HostDoc, type JobAction, type SetupOverrides } from '../types.js';
+import { APT_ACTIONS, DOCKER_ACTIONS, JOB_ACTIONS, SETUP_OPTIONS, WINDOWS_ACTIONS, hasApt, type AccessNetwork, type HaHostDetail, type HostDoc, type JobAction, type SetupOverrides } from '../types.js';
 import { haLevelSchema, normalizeHostDetail } from '../homeassistant/detail.js';
 import { carriedBy, carrierDeleteError } from '../roles.js';
 
@@ -299,6 +300,9 @@ export function registerHostRoutes(app: FastifyInstance) {
       if (req.body.action === 'agent_update' && !host.capabilities?.includes('agent_update')) {
         return reply.code(400).send({ error: "cet agent ne sait pas se mettre à jour : réinstalle-le une fois avec la commande d'installation" });
       }
+      if (req.body.action === 'agent_update' && !hostBinary(host)?.signed) {
+        return reply.code(409).send({ error: "binaire agent non signé sur le hub: impossible de mettre à jour cet agent avec vérification de signature" });
+      }
       if (req.body.action === 'reboot' && !host.capabilities?.includes('reboot')) {
         return reply.code(400).send({ error: "l'agent de cet hôte ne sait pas redémarrer : mets-le à jour" });
       }
@@ -324,6 +328,15 @@ export function registerHostRoutes(app: FastifyInstance) {
       if ((APT_ACTIONS as readonly string[]).includes(action) && !hasApt(host)) {
         return reply.code(400).send({ error: "pas d'APT sur cet hôte" });
       }
+      if ((WINDOWS_ACTIONS as readonly string[]).includes(action) && host.info?.osId !== 'windows') {
+        return reply.code(400).send({ error: "cet hôte n'est pas Windows" });
+      }
+      if (action === 'winget_upgrade' && !host.capabilities?.includes('updates_winget')) {
+        return reply.code(400).send({ error: "winget n'est pas disponible sur cet hôte" });
+      }
+      if (action === 'windows_update' && !host.capabilities?.includes('updates_windows')) {
+        return reply.code(400).send({ error: "Windows Update n'est pas disponible sur cet hôte" });
+      }
       if (action.startsWith('docker_') && !host.capabilities?.includes('docker')) {
         return reply.code(400).send({ error: "Docker (avec compose v2) n'est pas disponible sur cet hôte" });
       }
@@ -341,6 +354,52 @@ export function registerHostRoutes(app: FastifyInstance) {
       const packages = req.body.packages ?? [];
       if (!validPackages(packages)) return reply.code(400).send({ error: 'invalid package name' });
       const job = await createJob(host, action, packages, 'manual', { stack, service, sessionId });
+      reply.code(202);
+      return jobDto(job);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { id?: string } | undefined }>(
+    '/api/hosts/:id/updates/winget',
+    {
+      schema: {
+        params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+        body: {
+          type: ['object', 'null'],
+          additionalProperties: false,
+          properties: { id: { type: 'string', minLength: 1, maxLength: 200 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const _id = parseId(req.params.id);
+      const host = _id && (await hosts.findOne({ _id }));
+      if (!host) return reply.code(404).send({ error: 'host not found' });
+      if (!isOnline(req.params.id)) return reply.code(409).send({ error: 'hôte hors ligne' });
+      if (host.info?.osId !== 'windows') return reply.code(400).send({ error: "cet hôte n'est pas Windows" });
+      if (!host.capabilities?.includes('updates_winget')) return reply.code(400).send({ error: "winget n'est pas disponible sur cet hôte" });
+      const packages = req.body?.id ? [req.body.id] : [];
+      const job = await createJob(host, 'winget_upgrade', packages, 'manual');
+      reply.code(202);
+      return jobDto(job);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/hosts/:id/updates/windows',
+    {
+      schema: {
+        params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+      },
+    },
+    async (req, reply) => {
+      const _id = parseId(req.params.id);
+      const host = _id && (await hosts.findOne({ _id }));
+      if (!host) return reply.code(404).send({ error: 'host not found' });
+      if (!isOnline(req.params.id)) return reply.code(409).send({ error: 'hôte hors ligne' });
+      if (host.info?.osId !== 'windows') return reply.code(400).send({ error: "cet hôte n'est pas Windows" });
+      if (!host.capabilities?.includes('updates_windows')) return reply.code(400).send({ error: "Windows Update n'est pas disponible sur cet hôte" });
+      const job = await createJob(host, 'windows_update', [], 'manual');
       reply.code(202);
       return jobDto(job);
     },
